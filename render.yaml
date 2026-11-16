@@ -1,0 +1,21 @@
+# Render.com blueprint for the backend (Docker + persistent disk). Frontend → GitHub Pages (see workflow).
+services:
+  - type: web
+    name: ai-3d-studio-api
+    runtime: docker
+    rootDir: backend
+    plan: standard            # CAD kernel needs ≥2 GB RAM
+    healthCheckPath: /api/health
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: API_TOKEN
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false           # e.g. https://<user>.github.io
+      - key: DATA_DIR
+        value: /data
+    disk:
+      name: studio-data
+      mountPath: /data
+      sizeGB: 5

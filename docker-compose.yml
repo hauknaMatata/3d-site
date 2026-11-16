@@ -1,0 +1,19 @@
+# Local/full-stack run:  SECRET_KEY=... docker compose up --build
+services:
+  backend:
+    build: ./backend
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+      API_TOKEN: ${API_TOKEN:-}
+      CORS_ORIGINS: http://localhost:8080
+    volumes: ["studio-data:/data"]
+    ports: ["8000:8000"]
+  frontend:
+    image: nginx:1.27-alpine
+    depends_on: [backend]
+    ports: ["8080:80"]
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+volumes:
+  studio-data:
