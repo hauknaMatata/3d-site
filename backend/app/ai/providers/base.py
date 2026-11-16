@@ -15,7 +15,10 @@ import httpx
 
 
 class ProviderError(Exception):
-    pass
+    def __init__(self, msg: str, status: int | None = None, retryable: bool = False):
+        super().__init__(msg)
+        self.status = status
+        self.retryable = retryable or (status in (408, 409, 425, 429, 500, 502, 503, 504, 529))
 
 
 @dataclass
@@ -68,7 +71,7 @@ class Provider:
     def raise_for(r: httpx.Response, who: str) -> None:
         if r.status_code >= 400:
             body = r.text[:500]
-            raise ProviderError(f"{who} HTTP {r.status_code}: {body}")
+            raise ProviderError(f"{who} HTTP {r.status_code}: {body}", r.status_code)
 
 
 def sanitize_schema(schema: dict, strict_types: bool = False) -> dict:

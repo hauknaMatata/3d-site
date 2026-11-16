@@ -18,3 +18,4 @@ usd-core>=24.0
 cryptography>=42
 mcp>=1.10,<2
 pytest>=8
+rtree>=1.2

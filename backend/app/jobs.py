@@ -42,12 +42,22 @@ class Job:
     task: asyncio.Task | None = None
     started: float = field(default_factory=time.time)
     log: list[dict] = field(default_factory=list)
+    team: dict = field(default_factory=dict)
 
     def public(self) -> dict:
         return {"id": self.id, "status": self.status, "stage": self.stage, "stages": self.stages, "engine": self.engine,
                 "provider": self.provider, "step_index": self.step_index, "step_total": self.step_total,
                 "error": self.error, "prompt": self.prompt, "started": self.started, "log": self.log[-200:],
-                "resumable": self.status in ("error", "stopped") and (bool(self.pending) or self.engine == "llm")}
+                "resumable": self.status in ("error", "stopped") and (bool(self.pending) or self.engine in ("llm", "team")),
+                "team": team_public(self.team) if self.engine == "team" else None}
+
+
+TEAM_PUBLIC_KEYS = ("members", "budget", "round", "failed", "conflicts", "comparisons", "ai_scores", "decisions", "mode",
+                    "task", "only_member", "plan", "final_plan")
+
+
+def team_public(t: dict) -> dict:
+    return {k: t.get(k) for k in TEAM_PUBLIC_KEYS if k in t}
 
 
 JOBS: dict[str, Job] = {}
@@ -82,10 +92,10 @@ def save_message(pid: str, role: str, content: str, meta: dict | None = None) ->
     return msg
 
 
-async def _exec_step(job: Job, tool: str, args: dict, label: str, source: str) -> dict:
+async def _exec_step(job: Job, tool: str, args: dict, label: str, source: str, author: str | None = None) -> dict:
     """Run one real operation in a worker thread, then push the new model to the viewport."""
     rt = get_runtime(job.project_id)
-    _emit(job, {"type": "step_start", "tool": tool, "label": label, "args": args, "stage": job.stage})
+    _emit(job, {"type": "step_start", "tool": tool, "label": label, "args": args, "stage": job.stage, "author": author})
     t0 = time.time()
     async with rt.lock:
         if tool == "__params":
@@ -102,14 +112,14 @@ async def _exec_step(job: Job, tool: str, args: dict, label: str, source: str) -
             op = await asyncio.to_thread(rt.undo)
             out = {"undone": op["label"] if op else None}
         else:
-            r = await asyncio.to_thread(rt.apply, tool, args, label, source)
+            r = await asyncio.to_thread(rt.apply, tool, args, label, source, author)
             if r.get("query"):
                 _emit(job, {"type": "step_done", "tool": tool, "label": label, "result": r["result"], "query": True,
                             "ms": int((time.time() - t0) * 1000)})
                 return r["result"]
             out, op = r["result"], r["op"]
         snap = await asyncio.to_thread(rt.snapshot)
-    _emit(job, {"type": "step_done", "tool": tool, "label": label, "result": out, "op_id": op["id"] if op else None,
+    _emit(job, {"type": "step_done", "tool": tool, "label": label, "result": out, "op_id": op["id"] if op else None, "author": author,
                 "ms": int((time.time() - t0) * 1000), "snapshot": snap})
     if config.LIVE_BUILD_STEP_DELAY:
         await asyncio.sleep(config.LIVE_BUILD_STEP_DELAY)
@@ -334,6 +344,12 @@ async def _runner(job: Job, resume: bool) -> None:
     try:
         if job.engine == "llm":
             await run_llm(job, resume)
+        elif job.engine == "team":
+            from .team.orchestrator import run_team
+
+            await run_team(job, resume)
+            if job.status == "running":
+                job.status = "done"
         else:
             await run_planner(job, resume)
     except asyncio.CancelledError:
@@ -377,11 +393,35 @@ def start(pid: str, prompt: str, attachments: list[dict], selected: str | None, 
     return job
 
 
+def start_team(pid: str, prompt: str, attachments: list[dict], selected: str | None, mode: str | None,
+               member_id: str | None, task: str | None) -> Job:
+    cur = JOBS.get(pid)
+    if cur and cur.status == "running":
+        raise EngineError("A build is already running for this project — stop it first.")
+    from .team import config as tcfg
+
+    cfg = tcfg.load()
+    active = [m for m in cfg["members"] if m["enabled"]]
+    if not active:
+        raise EngineError("AI TEAM has no enabled agents. Add connections in Settings → AI Team.")
+    eff_mode = mode or cfg["mode"]
+    if eff_mode == "manual" and not (member_id and task):
+        raise EngineError("MANUAL mode: choose an agent and a task.")
+    pub_att = [{k: a.get(k) for k in ("id", "filename", "mime", "width", "height", "palette")} for a in attachments]
+    job = Job(uuid.uuid4().hex[:10], pid, prompt, attachments, selected, "team", None)
+    job.team = {"prompt": prompt, "selected": selected, "attachments": pub_att, "attachments_full": attachments,
+                "mode": eff_mode, "mode_override": mode, "task": task if eff_mode == "manual" else "full",
+                "only_member": member_id if eff_mode == "manual" else None}
+    JOBS[pid] = job
+    job.task = asyncio.create_task(_runner(job, False))
+    return job
+
+
 def stop(pid: str) -> Job | None:
     job = JOBS.get(pid)
     if job and job.status == "running":
         job.stop = True
-        if job.engine == "llm" and job.task:
+        if job.engine in ("llm", "team") and job.task:
             # LLM calls can take long: cancel the in-flight HTTP request too
             asyncio.get_running_loop().call_later(1.5, lambda: job.task and not job.task.done() and job.task.cancel())
     return job
@@ -393,6 +433,8 @@ def resume(pid: str) -> Job:
         raise EngineError("Nothing to resume.")
     if job.engine == "planner" and not job.pending:
         raise EngineError("Nothing left to resume.")
+    if job.engine == "team":
+        job.team.pop("failed", None) if job.status == "error" else None
     if job.engine == "planner" and job.status == "error":
         log(job, f"Pomijam nieudany krok: {job.pending[0]['label']}", "warn")
         job.pending.pop(0)

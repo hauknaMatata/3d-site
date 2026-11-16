@@ -1,9 +1,10 @@
-import { Bot, Cpu, Paperclip, Redo2, Send, Square, Undo2, User, X } from "lucide-react";
+import { Bot, Cpu, Paperclip, Redo2, Send, Square, Undo2, User, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import type { ProviderInfo, Snapshot } from "../lib/types";
 import { AttachmentThumb, useUpload } from "./LeftPanel";
+import TeamPanel, { useTeamConfig } from "./TeamPanel";
 
 const EXAMPLES: Record<string, string[]> = {
   cad: ["Stwórz kwadratową obudowę 100 × 100 × 30 mm z czterema otworami montażowymi i logo na górze",
@@ -28,6 +29,12 @@ export default function AIPanel() {
   const [drag, setDrag] = useState(false);
   const [scopeToSel, setScopeToSel] = useState(true);
   const upload = useUpload();
+  const rightTab = useStore((s) => s.rightTab);
+  const team = useTeamConfig();
+  const [manualMember, setManualMember] = useState("");
+  const [manualTask, setManualTask] = useState("build");
+  const setTab = (t: "chat" | "team") => { useStore.setState({ rightTab: t }); try { localStorage.setItem("ai3d.rightTab", t); } catch { /* */ } };
+  const teamMembers = team.cfg?.members.filter((m) => m.enabled) || [];
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -49,6 +56,16 @@ export default function AIPanel() {
     if (!p || !project || running) return;
     try {
       useStore.setState({ live: [] });
+      if (rightTab === "team") {
+        const manual = team.cfg?.mode === "manual";
+        const j = await api.post<NonNullable<typeof job>>(`/api/projects/${project.id}/team/jobs`, {
+          prompt: p, attachment_ids: pending, selected: scopeToSel ? selected : null,
+          member_id: manual ? manualMember || teamMembers[0]?.id : null, task: manual ? manualTask : null,
+        });
+        useStore.setState({ job: j, pendingAttach: [], team: j.team || null, teamMessages: [] });
+        setText("");
+        return;
+      }
       const j = await api.post<NonNullable<typeof job>>(`/api/projects/${project.id}/jobs`, {
         prompt: p, attachment_ids: pending, selected: scopeToSel ? selected : null,
         provider_id: providerId && providerId !== "offline" ? providerId : "offline", model: model || null,
@@ -70,13 +87,17 @@ export default function AIPanel() {
     <div className="h-full flex flex-col bg-panel border-l border-line"
       onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
       onDrop={async (e) => { e.preventDefault(); setDrag(false); const ids = await upload(e.dataTransfer.files); useStore.setState({ pendingAttach: [...pending, ...ids] }); }}>
-      <div className="panel-title"><span className="flex items-center gap-1.5"><Bot size={13} /> Asystent AI</span>
+      <div className="flex items-center h-8 px-1 border-b border-line">
+        <button onClick={() => setTab("chat")} className={`tab !h-8 flex items-center gap-1.5 ${rightTab === "chat" ? "tab-on" : ""}`}><Bot size={13} /> Asystent AI</button>
+        <button onClick={() => setTab("team")} className={`tab !h-8 flex items-center gap-1.5 ${rightTab === "team" ? "tab-on" : ""}`}><Users size={13} /> AI Team
+          {job?.engine === "team" && running && <span className="w-1.5 h-1.5 rounded-full bg-accent pulse-dot" />}</button>
+        <div className="flex-1" />
         <span className="flex items-center gap-0.5">
           <button className="icon-btn !w-6 !h-6" title="Cofnij (Ctrl+Z)" disabled={!snap?.can_undo || running} onClick={() => ctl("undo")}><Undo2 size={13} /></button>
           <button className="icon-btn !w-6 !h-6" title="Ponów (Ctrl+Shift+Z)" disabled={!snap?.can_redo || running} onClick={() => ctl("redo")}><Redo2 size={13} /></button>
         </span>
       </div>
-      <div className="px-3 py-2 border-b border-line space-y-1.5">
+      {rightTab === "chat" && <div className="px-3 py-2 border-b border-line space-y-1.5">
         <div className="flex gap-1.5">
           <select className="input !w-1/2" value={providerId} onChange={(e) => { setProviderId(e.target.value); try { localStorage.setItem("ai3d.provider", e.target.value); } catch { /* */ } }}>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -88,7 +109,9 @@ export default function AIPanel() {
             </select>
           ) : <div className="w-1/2 text-xxs text-mute leading-tight flex items-center">Reguły + szablony, bez LLM. Dodaj dostawcę w Ustawieniach.</div>}
         </div>
-      </div>
+      </div>}
+
+      {rightTab === "team" ? <div className="flex-1 min-h-0"><TeamPanel /></div> : (
 
       <div ref={listRef} className={`flex-1 overflow-y-auto px-3 py-2 space-y-3 ${drag ? "bg-accent/5 outline-dashed outline-1 outline-accent -outline-offset-4" : ""}`}>
         {!messages.length && (
@@ -130,7 +153,19 @@ export default function AIPanel() {
         )}
       </div>
 
+      )}
+
       <div className="p-2 border-t border-line">
+        {rightTab === "team" && team.cfg?.mode === "manual" && (
+          <div className="flex gap-1 mb-1.5">
+            <select className="input" value={manualMember || teamMembers[0]?.id || ""} onChange={(e) => setManualMember(e.target.value)}>
+              {teamMembers.map((m) => <option key={m.id} value={m.id}>{m.label || m.model}</option>)}
+            </select>
+            <select className="input" value={manualTask} onChange={(e) => setManualTask(e.target.value)}>
+              <option value="plan">Plan</option><option value="build">Modelowanie</option><option value="review">Kontrola jakości</option><option value="fix">Poprawki</option>
+            </select>
+          </div>
+        )}
         {(pending.length > 0 || selected) && (
           <div className="flex flex-wrap gap-1 mb-1.5">
             {selected && (
@@ -152,11 +187,11 @@ export default function AIPanel() {
           <button className="icon-btn" title="Dołącz obraz (PNG, JPG, WEBP, SVG)" onClick={() => fileRef.current?.click()}><Paperclip size={14} /></button>
           <input ref={fileRef} type="file" multiple accept=".png,.jpg,.jpeg,.webp,.svg" className="hidden"
             onChange={async (e) => { if (e.target.files) { const ids = await upload(e.target.files); useStore.setState({ pendingAttach: [...useStore.getState().pendingAttach, ...ids] }); e.target.value = ""; } }} />
-          <span className="text-xxs text-mute flex-1 truncate">{providerId === "offline" ? "Planer offline" : `${prov?.name ?? ""} · ${model}`}</span>
+          <span className="text-xxs text-mute flex-1 truncate">{rightTab === "team" ? `AI Team · ${teamMembers.length} agent(ów) · ${(team.cfg?.mode || "").toUpperCase()}` : providerId === "offline" ? "Planer offline" : `${prov?.name ?? ""} · ${model}`}</span>
           {running ? (
             <button className="btn !border-err/60 !text-err" onClick={() => ctl("jobs/stop")}><Square size={12} fill="currentColor" /> Stop</button>
           ) : (
-            <button className="btn-primary" disabled={!text.trim()} onClick={() => send()}><Send size={13} /> Wyślij</button>
+            <button className="btn-primary" disabled={!text.trim() || (rightTab === "team" && !teamMembers.length)} onClick={() => send()}><Send size={13} /> {rightTab === "team" ? "Zespół" : "Wyślij"}</button>
           )}
         </div>
       </div>

@@ -249,7 +249,8 @@ class OllamaProvider(Provider):
         self.raise_for(r, "Ollama")
         j = r.json()
         msg = j.get("message") or {}
-        turn = AssistantTurn(text=msg.get("content") or "", stop_reason=j.get("done_reason", ""))
+        turn = AssistantTurn(text=msg.get("content") or "", stop_reason=j.get("done_reason", ""),
+                             usage={"prompt_eval_count": j.get("prompt_eval_count"), "eval_count": j.get("eval_count")})
         for t in msg.get("tool_calls") or []:
             args = t["function"].get("arguments") or {}
             if isinstance(args, str):

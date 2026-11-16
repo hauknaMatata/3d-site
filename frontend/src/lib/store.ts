@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { api, wsUrl } from "./api";
-import type { Attachment, Confirm, Job, JobLogEntry, Message, Project, Snapshot } from "./types";
+import type { Attachment, Confirm, Job, JobLogEntry, Message, Project, QAReport, Snapshot, TeamIssue, TeamMessage, TeamPublic } from "./types";
 
 export type Shading = "wireframe" | "solid" | "material" | "render";
 export type Gizmo = "none" | "translate" | "rotate" | "scale";
@@ -22,6 +22,12 @@ interface State {
   viewCmd: { view: string; n: number } | null;
   pendingAttach: string[];
   newNames: Set<string>;
+  team: TeamPublic | null;
+  teamMessages: TeamMessage[];
+  teamIssues: TeamIssue[];
+  qa: QAReport | null;
+  rightTab: "chat" | "team";
+  refreshTeam: () => Promise<void>;
   open: (id: string) => Promise<void>;
   close: () => void;
   setSnap: (s: Snapshot) => void;
@@ -39,7 +45,16 @@ let wsTimer: number | undefined;
 export const useStore = create<State>((set, get) => ({
   project: null, snap: null, job: null, live: [], messages: [], attachments: [], selected: null,
   shading: "material", gizmo: "none", hdri: "studio", confirms: [], wsState: "closed", toast: null, viewCmd: null,
-  pendingAttach: [], newNames: new Set(),
+  pendingAttach: [], newNames: new Set(), team: null, teamMessages: [], teamIssues: [], qa: null,
+  rightTab: (() => { try { return (localStorage.getItem("ai3d.rightTab") as "chat" | "team") || "chat"; } catch { return "chat"; } })(),
+  refreshTeam: async () => {
+    const p = get().project;
+    if (!p) return;
+    const [m, i, q] = await Promise.all([
+      api.get<TeamMessage[]>(`/api/projects/${p.id}/team/messages`), api.get<TeamIssue[]>(`/api/projects/${p.id}/team/issues`),
+      api.get<{ report: QAReport }[]>(`/api/projects/${p.id}/team/qa?limit=1`)]).catch(() => [[], [], []] as [TeamMessage[], TeamIssue[], { report: QAReport }[]]);
+    set({ teamMessages: m, teamIssues: i, qa: q[0]?.report || null });
+  },
   set: (p) => set(p),
   notify: (msg, kind = "info") => { set({ toast: { msg, kind } }); window.setTimeout(() => { if (get().toast?.msg === msg) set({ toast: null }); }, 4200); },
   setView: (v) => set({ viewCmd: { view: v, n: (get().viewCmd?.n || 0) + 1 } }),
@@ -53,14 +68,14 @@ export const useStore = create<State>((set, get) => ({
   },
   refreshMessages: async () => { const p = get().project; if (p) set({ messages: await api.get<Message[]>(`/api/projects/${p.id}/messages`) }); },
   refreshAttachments: async () => { const p = get().project; if (p) set({ attachments: await api.get<Attachment[]>(`/api/projects/${p.id}/attachments`) }); },
-  close: () => { ws?.close(); ws = null; window.clearTimeout(wsTimer); set({ project: null, snap: null, job: null, live: [], messages: [], attachments: [], selected: null }); },
+  close: () => { ws?.close(); ws = null; window.clearTimeout(wsTimer); set({ project: null, snap: null, job: null, live: [], messages: [], attachments: [], selected: null, team: null, teamMessages: [], teamIssues: [], qa: null }); },
   open: async (id) => {
     get().close();
     const p = await api.get<Project & { snapshot: Snapshot; job: Job | null }>(`/api/projects/${id}`);
     set({ project: { id: p.id, name: p.name, mode: p.mode, created: p.created, updated: p.updated }, snap: p.snapshot, job: p.job,
-          live: p.job?.log || [], newNames: new Set(), shading: "material" });
+          live: p.job?.log || [], newNames: new Set(), shading: "material", team: p.job?.team || null });
     try { localStorage.setItem("ai3d.lastProject", id); } catch { /* */ }
-    await Promise.all([get().refreshMessages(), get().refreshAttachments()]);
+    await Promise.all([get().refreshMessages(), get().refreshAttachments(), get().refreshTeam()]);
     const connect = () => {
       if (get().project?.id !== id) return;
       set({ wsState: "connecting" });
@@ -71,9 +86,13 @@ export const useStore = create<State>((set, get) => ({
         const ev = JSON.parse(e.data);
         const st = get();
         switch (ev.type) {
-          case "hello": st.setSnap(ev.snapshot); set({ job: ev.job, confirms: ev.confirms || [], live: ev.job?.log || st.live }); break;
+          case "hello": st.setSnap(ev.snapshot); set({ job: ev.job, confirms: ev.confirms || [], live: ev.job?.log || st.live, team: ev.job?.team || st.team }); break;
+          case "team_state": set({ team: ev.team }); break;
+          case "team_message": set({ teamMessages: [...st.teamMessages.filter((m) => m.id !== ev.message.id), ev.message].slice(-600) }); break;
+          case "team_issue": set({ teamIssues: [ev.issue, ...st.teamIssues.filter((i) => i.id !== ev.issue.id)] }); break;
+          case "team_qa": set({ qa: ev.report }); break;
           case "snapshot": st.setSnap(ev.snapshot); break;
-          case "job": set({ job: ev.job }); if (ev.job.status !== "running") st.refreshMessages(); break;
+          case "job": set({ job: ev.job, team: ev.job.team || st.team }); if (ev.job.status !== "running") { st.refreshMessages(); st.refreshTeam(); } break;
           case "message": set({ messages: [...st.messages.filter((m) => m.id !== ev.message.id), ev.message] }); break;
           case "attachments": st.refreshAttachments(); break;
           case "confirm_request": set({ confirms: [...st.confirms, { id: ev.id, title: ev.title, detail: ev.detail }] }); break;

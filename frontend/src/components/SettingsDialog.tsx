@@ -14,7 +14,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
       <div className="w-full max-w-3xl h-[82vh] flex flex-col bg-panel border border-line2 rounded-xl shadow-2xl slide-in" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 h-11 border-b border-line">
           <div className="flex gap-1">
-            {([["providers", "Modele AI"], ["tasks", "Przypisanie zadań"], ["mcp", "Serwery MCP"], ["connection", "Połączenie"]] as [Tab, string][]).map(([k, l]) => (
+            {([["providers", "AI Connections"], ["tasks", "Przypisanie zadań"], ["mcp", "Serwery MCP"], ["connection", "Połączenie"]] as [Tab, string][]).map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} className={`tab !h-11 ${tab === k ? "tab-on" : ""}`}>{l}</button>
             ))}
           </div>
@@ -37,7 +37,11 @@ function Providers() {
   const [def, setDef] = useState<string | null>(null);
   const [form, setForm] = useState({ kind: "anthropic", name: "", api_key: "", base_url: "", default_model: "" });
   const [tests, setTests] = useState<Record<string, { ok: boolean; error?: string; reply?: string; model?: string } | "busy">>({});
-  const load = () => api.get<{ providers: ProviderInfo[]; default_provider: string | null }>("/api/providers").then((r) => { setList(r.providers); setDef(r.default_provider); window.dispatchEvent(new Event("ai3d:providers")); });
+  const [usage, setUsage] = useState<{ provider_id: string; model: string; calls: number; tokens_in: number; tokens_out: number; errors: number; retries: number; last_error: string; last_ok: number | null; last_latency_ms: number | null }[]>([]);
+  const load = () => {
+    api.get<typeof usage>("/api/team/usage").then(setUsage).catch(() => undefined);
+    return api.get<{ providers: ProviderInfo[]; default_provider: string | null }>("/api/providers").then((r) => { setList(r.providers); setDef(r.default_provider); window.dispatchEvent(new Event("ai3d:providers")); window.dispatchEvent(new Event("ai3d:team")); });
+  };
   useEffect(() => { api.get<{ provider_kinds: Kind[] }>("/api/capabilities").then((c) => setKinds(c.provider_kinds)); load(); }, []);
   const kind = kinds.find((k) => k.kind === form.kind);
   const add = async () => {
@@ -51,7 +55,7 @@ function Providers() {
   };
   return (
     <div className="space-y-5">
-      <div className="text-dim leading-relaxed">Klucze API są wysyłane jednorazowo do backendu i przechowywane <b>zaszyfrowane</b> (Fernet) w bazie serwera — nigdy w przeglądarce. Integracje używają bezpośrednio REST API dostawców (niezależnie od MCP).</div>
+      <div className="text-dim leading-relaxed">Każde połączenie ma osobny klucz, adres i wybór modelu. Możesz podłączyć jeden, dwa, trzy lub więcej modeli — skład zespołu, role i kolejność ustawiasz w zakładce AI Team. Klucze API są wysyłane jednorazowo do backendu i przechowywane <b>zaszyfrowane</b> (Fernet) w bazie serwera — nigdy w przeglądarce. Integracje używają bezpośrednio REST API dostawców (niezależnie od MCP).</div>
       <div className="rounded-lg border border-line2 p-3 grid grid-cols-2 gap-2">
         <div><div className="label mb-1">Dostawca</div>
           <select className="input" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value, base_url: "" })}>
@@ -85,6 +89,15 @@ function Providers() {
                 <button className="btn !h-6" onClick={() => test(p.id)}>{t === "busy" ? <Loader2 size={12} className="animate-spin" /> : <Plug size={12} />} Testuj</button>
                 <button className="icon-btn" title="Usuń" onClick={async () => { if (confirm(`Usunąć dostawcę ${p.name}?`)) { await api.del(`/api/providers/${p.id}`); load(); } }}><Trash2 size={13} /></button>
               </div>
+              {usage.filter((u) => u.provider_id === p.id).map((u) => (
+                <div key={u.model} className="mt-1.5 flex flex-wrap gap-x-3 text-xxs font-mono text-mute">
+                  <span className="text-dim">{u.model}</span><span>{u.calls} wywołań</span>
+                  <span>{u.tokens_in.toLocaleString("pl-PL")} tok we / {u.tokens_out.toLocaleString("pl-PL")} wy</span>
+                  {u.last_latency_ms != null && <span>{u.last_latency_ms} ms</span>}
+                  {u.retries > 0 && <span className="text-warn">{u.retries} ponowień</span>}
+                  {u.errors > 0 && <span className="text-err" title={u.last_error}>{u.errors} błędów: {u.last_error.slice(0, 80)}</span>}
+                </div>
+              ))}
               {t && t !== "busy" && (
                 <div className={`mt-2 text-xxs flex items-start gap-1.5 ${t.ok ? "text-ok" : "text-err"}`}>
                   {t.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}

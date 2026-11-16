@@ -32,6 +32,19 @@ CREATE TABLE IF NOT EXISTS mcp_servers(
   enabled INTEGER DEFAULT 1, permission TEXT DEFAULT 'ask', disabled_tools TEXT DEFAULT '[]',
   tools_cache TEXT DEFAULT '[]', status TEXT DEFAULT 'unknown', created REAL);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS team_messages(
+  id TEXT PRIMARY KEY, project_id TEXT, job_id TEXT, round INTEGER, phase TEXT, agent_id TEXT, agent_name TEXT,
+  role TEXT, kind TEXT, content TEXT, data TEXT, tokens INTEGER, created REAL);
+CREATE TABLE IF NOT EXISTS team_issues(
+  id TEXT PRIMARY KEY, project_id TEXT, job_id TEXT, round INTEGER, author_id TEXT, author_name TEXT, severity TEXT,
+  category TEXT, target TEXT, problem TEXT, evidence TEXT, qa_check TEXT, backed_by_test INTEGER, fix TEXT, status TEXT,
+  reviews TEXT, decision TEXT, op_ids TEXT, version_before TEXT, created REAL, updated REAL);
+CREATE TABLE IF NOT EXISTS team_qa(
+  id TEXT PRIMARY KEY, project_id TEXT, job_id TEXT, round INTEGER, stage TEXT, report TEXT, created REAL);
+CREATE TABLE IF NOT EXISTS agent_usage(
+  key TEXT PRIMARY KEY, provider_id TEXT, model TEXT, calls INTEGER DEFAULT 0, tokens_in INTEGER DEFAULT 0,
+  tokens_out INTEGER DEFAULT 0, errors INTEGER DEFAULT 0, retries INTEGER DEFAULT 0, last_error TEXT DEFAULT '',
+  last_ok REAL, last_latency_ms INTEGER, updated REAL);
 """
 
 

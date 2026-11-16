@@ -12,12 +12,6 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
-@pytest.fixture(scope="module")
-def client():
-    with TestClient(app) as c:  # the MCP session manager allows one lifespan per process
-        yield c
-
-
 def _wait_job(c, pid, timeout=120):
     t0 = time.time()
     while time.time() - t0 < timeout:

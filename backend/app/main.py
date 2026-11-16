@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from . import config, db, jobs
 from .hub import hub
 from .mcp_server import mcp
-from .routes import projects, settings
+from .routes import projects, settings, team
 from .runtime import get_runtime
 
 mcp_app = mcp.streamable_http_app()
@@ -41,6 +41,7 @@ async def auth(request: Request, call_next):
 
 app.include_router(settings.router)
 app.include_router(projects.router)
+app.include_router(team.router)
 app.mount("/mcp", mcp_app)
 
 

@@ -64,7 +64,7 @@ class ProjectRuntime:
                 self.state["texture_res"] = self.engine.texture_res
 
     # ---------------------------------------------------------------- mutations (call from a thread)
-    def apply(self, tool: str, args: dict, label: str = "", source: str = "user") -> dict[str, Any]:
+    def apply(self, tool: str, args: dict, label: str = "", source: str = "user", author: str | None = None) -> dict[str, Any]:
         with self.tlock:
             spec = self.engine.tools.get(tool)
             if spec is None:
@@ -75,7 +75,7 @@ class ProjectRuntime:
             self._check_locked(tool, resolved)
             result = self.engine.apply(tool, resolved)
             op = {"id": db.new_id(), "tool": tool, "args": args, "label": label or tool.replace("_", " "),
-                  "source": source, "t": time.time()}
+                  "source": source, "author": author, "t": time.time()}
             self.state["ops"].append(op)
             self.state["redo"] = []
             if self.mode == "game":
@@ -209,7 +209,7 @@ class ProjectRuntime:
                 o["hidden"] = o["name"] in hidden
                 o["locked"] = o["name"] in locked
                 objs.append(o)
-            ops = [{"id": o["id"], "tool": o["tool"], "label": o["label"], "args": o["args"], "source": o.get("source"),
+            ops = [{"id": o["id"], "tool": o["tool"], "label": o["label"], "args": o["args"], "source": o.get("source"), "author": o.get("author"),
                     "error": self.errors.get(o["id"])} for o in self.state["ops"]]
             empty = len(objs) == 0
             return {
