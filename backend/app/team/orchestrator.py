@@ -21,6 +21,7 @@ from ..qa import run_qa
 from ..runtime import get_runtime
 from . import config as tcfg
 from . import context
+from .bridge import broker
 from .llm import AgentDown, Budget, LimitExceeded, call, call_json
 
 # role → tools it may use when acting on the engine
@@ -84,11 +85,13 @@ class TeamRun:
         return tcfg.member_for(role, self.roles, self.members)
 
     def name(self, m: dict) -> str:
-        return m["label"] or m.get("model_resolved") or m["model"] or m["provider_id"]
+        return m["label"] or m.get("model_resolved") or m.get("model") or m.get("provider_id") or "agent"
 
     def publish_state(self) -> None:
         roles = self.roles
-        self.t["members"] = [{"id": m["id"], "name": self.name(m), "provider_id": m["provider_id"], "model": m.get("model_resolved") or m["model"],
+        self.t["members"] = [{"id": m["id"], "name": self.name(m), "provider_id": m.get("provider_id"),
+                              "model": "MCP · " + ("połączony" if broker.connected(m["id"]) else "niepołączony") if m.get("kind") == "mcp" else m.get("model_resolved") or m["model"],
+                              "kind": m.get("kind", "api"), "connected": broker.connected(m["id"]) if m.get("kind") == "mcp" else None,
                               "color": m["color"], "roles": roles.get(m["id"], []), "failed": m["id"] in self.failed,
                               **self.states[m["id"]]} for m in self.members]
         self.t["budget"] = {"tokens": self.budget.tokens, "seconds": int(time.time() - self.budget.t0), "cost": round(self.budget.cost, 4)}
@@ -145,8 +148,12 @@ class TeamRun:
         st = self.states[m["id"]]
         before = st.get("tokens_in", 0) + st.get("tokens_out", 0)
         try:
-            data, turn = await call_json(m, sys_prompt(m, self.roles.get(m["id"], ["reviewer"]), self.rt.mode),
-                                         f"{ctx}\n\n## YOUR TASK\n{instruction}", self.budget, self.cfg["retries"], st, imgs)
+            if m.get("kind") == "mcp":
+                data = await self.via_mcp(m, "json", task, sys_prompt(m, self.roles.get(m["id"], ["reviewer"]), self.rt.mode),
+                                          f"{ctx}\n\n## YOUR TASK\n{instruction}")
+            else:
+                data, turn = await call_json(m, sys_prompt(m, self.roles.get(m["id"], ["reviewer"]), self.rt.mode),
+                                             f"{ctx}\n\n## YOUR TASK\n{instruction}", self.budget, self.cfg["retries"], st, imgs)
         except AgentDown as e:
             self.mark_failed(m, str(e))
             return None
@@ -155,6 +162,51 @@ class TeamRun:
         self.post(m, phase, kind, str(text)[:2000], data, used)
         self.status(m, "idle")
         return data
+
+    async def via_mcp(self, m: dict, kind: str, title: str, system: str, body: str, allowed: list[str] | None = None,
+                      run_op=None):
+        base_task = self.states[m["id"]].get("task", "")
+
+        def on_wait(picked: bool) -> None:
+            want = base_task if picked else f"{base_task} — czeka na agenta MCP (otwórz aplikację AI)"
+            if self.states[m["id"]]["task"] != want:
+                self.states[m["id"]]["task"] = want
+                self.publish_state()
+            self.check_stop()
+
+        return await broker.request(m, self.pid, self.job.id, kind, title, system, body, float(self.cfg.get("mcp_timeout", 900)),
+                                    allowed, run_op, on_wait)
+
+    async def mcp_build(self, m: dict, roles: list[str], instruction: str, purpose: str, status: str, task: str) -> int:
+        tools_allowed = role_tools(self.rt.mode, roles, self.rt.engine.tools)
+        counter = {"ops": 0}
+        self.status(m, status, task)
+
+        async def run_op(tool: str, args: dict):
+            self.check_stop()
+            if tool == "set_parameters":
+                return await _exec_step(self.job, "__params", {"updates": (args or {}).get("updates") or {}}, "Parametry", "ai", self.name(m))
+            if tool == "report_stage":
+                set_stage(self.job, f"{(args or {}).get('name', '')} ({self.name(m)})"[:90])
+                return "ok"
+            if tool not in tools_allowed:
+                raise EngineError(f"Tool '{tool}' is not allowed for your role(s) {roles}. Allowed: {sorted(tools_allowed)}")
+            args = dict(args or {})
+            out = await _exec_step(self.job, tool, args, args.pop("_label", None) or tool.replace("_", " "), "ai", self.name(m))
+            if self.rt.engine.tools[tool].mutating:
+                counter["ops"] += 1
+                self.states[m["id"]]["ops"] += 1
+            return out
+
+        body = context.build(self.rt, self.t, purpose) + f"\n\n## YOUR TASK\n{instruction}"
+        try:
+            summary = await self.via_mcp(m, "build", task, sys_prompt(m, roles, self.rt.mode), body, sorted(tools_allowed), run_op)
+        except AgentDown as e:
+            self.mark_failed(m, str(e))
+            return -1
+        self.post(m, purpose, "build", str(summary)[:2000] or "Zakończono.", {"ops": counter["ops"]})
+        self.status(m, "idle")
+        return counter["ops"]
 
     # ------------------------------------------------------------------ phases
     async def phase_plan(self) -> None:
@@ -217,6 +269,8 @@ class TeamRun:
     async def tool_loop(self, m: dict, roles: list[str], instruction: str, purpose: str, status: str, task: str,
                         max_turns: int) -> int:
         """Agent drives the engine through tool calls; every call goes through the central operation system."""
+        if m.get("kind") == "mcp":
+            return await self.mcp_build(m, roles, instruction, purpose, status, task)
         tools_allowed = role_tools(self.rt.mode, roles, self.rt.engine.tools)
         tools = [ToolDef(t.name, t.description, t.schema()) for n, t in self.rt.engine.tools.items() if n in tools_allowed]
         tools += [t for t in META_TOOLS if t.name in ("report_stage", "set_parameters", "get_scene")]
@@ -532,10 +586,14 @@ class TeamRun:
         set_stage(self.job, "Podsumowanie")
         self.status(lead, "thinking", "Podsumowanie")
         try:
-            turn = await call(lead, sys_prompt(lead, self.roles[lead["id"]], self.rt.mode),
-                              [{"role": "user", "content": [{"type": "text", "text": context.build(self.rt, self.t, "summary") + SUMMARY_TASK}]}],
-                              [], self.budget, self.cfg["retries"], self.states[lead["id"]], 1500)
-            text = turn.text.strip() or "Gotowe."
+            if lead.get("kind") == "mcp":
+                text = str(await self.via_mcp(lead, "text", "Podsumowanie", sys_prompt(lead, self.roles[lead["id"]], self.rt.mode),
+                                              context.build(self.rt, self.t, "summary") + SUMMARY_TASK)).strip() or "Gotowe."
+            else:
+                turn = await call(lead, sys_prompt(lead, self.roles[lead["id"]], self.rt.mode),
+                                  [{"role": "user", "content": [{"type": "text", "text": context.build(self.rt, self.t, "summary") + SUMMARY_TASK}]}],
+                                  [], self.budget, self.cfg["retries"], self.states[lead["id"]], 1500)
+                text = turn.text.strip() or "Gotowe."
         except AgentDown as e:
             self.mark_failed(lead, str(e))
             text = "Zespół zakończył pracę (podsumowanie niedostępne — lead nie odpowiada)."

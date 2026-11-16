@@ -33,6 +33,7 @@ DEFAULTS: dict[str, Any] = {
     "max_cost_usd": None,           # needs per-member prices
     "auto_apply_max_severity": "major",  # minor | major | critical — above this, ask the user even in AUTO
     "retries": 3,
+    "mcp_timeout": 900,             # seconds an MCP agent (no API key) has to pick up + finish a task
 }
 SEVERITY_ORDER = {"minor": 0, "major": 1, "critical": 2}
 
@@ -45,6 +46,7 @@ def load() -> dict[str, Any]:
         m.setdefault("role", "auto")
         m.setdefault("order", i)
         m.setdefault("color", COLORS[i % len(COLORS)])
+        m.setdefault("kind", "api")
     return cfg
 
 
@@ -57,12 +59,19 @@ def save(cfg: dict[str, Any]) -> dict[str, Any]:
     for k, lo, hi in (("max_rounds", 0, 5), ("max_debate_rounds", 0, 4), ("build_max_turns", 3, 80), ("retries", 0, 6)):
         clean[k] = max(lo, min(hi, int(clean[k])))
     members = []
+    clean["mcp_timeout"] = max(30, min(7200, int(clean.get("mcp_timeout") or 900)))
     for i, m in enumerate(clean["members"]):
-        if not m.get("provider_id"):
-            raise ValueError("each member needs provider_id")
+        kind = m.get("kind", "api")
+        if kind not in ("api", "mcp"):
+            raise ValueError("member kind must be api|mcp")
+        if kind == "api" and not m.get("provider_id"):
+            raise ValueError("API members need provider_id (MCP members don't)")
+        if kind == "mcp" and not (m.get("label") or "").strip():
+            raise ValueError("MCP members need a name (used by team_join)")
         if m.get("role", "auto") not in (*ROLES, "auto"):
             raise ValueError(f"unknown role {m.get('role')}")
-        members.append({"id": m.get("id") or uuid.uuid4().hex[:8], "provider_id": m["provider_id"], "model": m.get("model") or "",
+        members.append({"id": m.get("id") or uuid.uuid4().hex[:8], "kind": kind, "provider_id": m.get("provider_id") if kind == "api" else None,
+                        "model": m.get("model") or "" if kind == "api" else "",
                         "role": m.get("role", "auto"), "enabled": bool(m.get("enabled", True)), "order": int(m.get("order", i)),
                         "label": (m.get("label") or "")[:40], "color": m.get("color") or COLORS[i % len(COLORS)],
                         "price_in": m.get("price_in"), "price_out": m.get("price_out")})

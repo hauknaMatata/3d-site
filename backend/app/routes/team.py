@@ -34,6 +34,18 @@ def put_config(body: dict):
     return {**cfg, "roles": tcfg.ROLES, "statuses": tcfg.STATUSES, "effective_roles": tcfg.assign_roles(cfg["members"])}
 
 
+@router.get("/team/mcp/agents")
+def mcp_agents():
+    from ..team.bridge import broker
+
+    out = []
+    for m in tcfg.load()["members"]:
+        if m.get("kind") == "mcp":
+            out.append({"id": m["id"], "label": m["label"], "enabled": m["enabled"], "connected": broker.connected(m["id"]),
+                        "last_seen": broker.seen.get(m["id"]), "pending": [t.title for t in broker.pending_for(m["id"])]})
+    return out
+
+
 @router.get("/team/usage")
 def usage():
     return db.q("SELECT * FROM agent_usage ORDER BY updated DESC")

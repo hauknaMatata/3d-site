@@ -120,3 +120,78 @@ async def delete_project(project_id: str) -> str:
 
     _del(project_id, confirm=True)
     return "deleted"
+
+
+# ============================================================================ AI TEAM over MCP (no API keys)
+AGENT_LOOP = ("You are now a member of the AI 3D Studio team. Repeat until you get status 'stop': call team_wait_for_task; "
+              "if status is 'task', follow 'role_instructions' and 'task' exactly and answer as 'how_to_answer' says "
+              "(modeling tasks: team_run_operation for every change, then team_submit); if status is 'no_task', call "
+              "team_wait_for_task again. Be independent and critical; never invent measurements.")
+
+
+def _mcp_member(agent: str) -> dict | None:
+    from .team import config as tcfg
+
+    a = (agent or "").strip().lower()
+    for m in tcfg.load()["members"]:
+        if m.get("kind") == "mcp" and m["enabled"] and (m["id"] == agent or (m.get("label") or "").strip().lower() == a):
+            return m
+    return None
+
+
+@mcp.tool()
+def team_join(agent_name: str) -> str:
+    """Join the AI 3D Studio team as the MCP agent with this name (configured in the web UI → AI Team, member type
+    'Agent MCP'). Returns your agent_id and the working loop to follow."""
+    from .team import config as tcfg
+    from .team.bridge import broker
+
+    m = _mcp_member(agent_name)
+    if not m:
+        names = [x["label"] for x in tcfg.load()["members"] if x.get("kind") == "mcp" and x["enabled"]]
+        return json.dumps({"error": f"No enabled MCP team member named '{agent_name}'.", "available_names": names,
+                           "hint": "Add an 'Agent MCP' member with this name in the web UI → AI Team → ⚙."})
+    broker.touch(m["id"])
+    roles = tcfg.assign_roles(tcfg.load()["members"]).get(m["id"], [])
+    return json.dumps({"agent_id": m["id"], "name": m["label"], "roles": [tcfg.ROLES[r]["label"] for r in roles],
+                       "instructions": AGENT_LOOP})
+
+
+@mcp.tool()
+async def team_wait_for_task(agent_id: str, timeout_s: int = 40) -> str:
+    """Wait (long-poll, max ~50 s) for your next team task. Call this in a loop. Returns status task | no_task."""
+    from .team.bridge import broker
+
+    m = _mcp_member(agent_id)
+    if not m:
+        return json.dumps({"status": "stop", "reason": "unknown or disabled agent_id — call team_join again"})
+    t = await broker.next_task(m["id"], max(1, min(int(timeout_s or 40), 50)))
+    if not t:
+        return json.dumps({"status": "no_task", "hint": "No work right now. Call team_wait_for_task again."})
+    return json.dumps(t.payload(), ensure_ascii=False)
+
+
+@mcp.tool()
+async def team_run_operation(task_id: str, tool: str, args: dict) -> str:
+    """Execute ONE modeling operation for a 'build' task (validated, authored with your name, undoable).
+    Use set_parameters with {"updates": {...}} for user parameters."""
+    from .team.bridge import broker
+
+    t = broker.tasks.get(task_id)
+    if not t or t.done or t.kind != "build" or not t.run_op:
+        return "ERROR: not an open build task_id"
+    broker.touch(t.member_id)
+    try:
+        out = await t.run_op(tool, args or {})
+        return json.dumps(out, default=str)[:8000]
+    except EngineError as e:
+        return f"ERROR: {e}"
+
+
+@mcp.tool()
+def team_submit(task_id: str, result: str) -> str:
+    """Hand in the result of a team task (JSON object for 'json' tasks, text summary otherwise)."""
+    from .team.bridge import broker
+
+    ok, msg = broker.submit(task_id, result if isinstance(result, str) else json.dumps(result))
+    return json.dumps({"ok": ok, "message": msg, "next": "call team_wait_for_task" if ok else "fix and submit again"})

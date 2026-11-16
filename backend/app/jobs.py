@@ -421,6 +421,10 @@ def stop(pid: str) -> Job | None:
     job = JOBS.get(pid)
     if job and job.status == "running":
         job.stop = True
+        if job.engine == "team":
+            from .team.bridge import broker
+
+            broker.cancel_job(job.id)
         if job.engine in ("llm", "team") and job.task:
             # LLM calls can take long: cancel the in-flight HTTP request too
             asyncio.get_running_loop().call_later(1.5, lambda: job.task and not job.task.done() and job.task.cancel())

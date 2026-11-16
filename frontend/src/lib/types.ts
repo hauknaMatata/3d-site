@@ -33,7 +33,7 @@ export interface Confirm { id: string; title: string; detail: string }
 // ---------------------------------------------------------------- AI TEAM
 export type AgentStatus = "idle" | "thinking" | "analyzing" | "modeling" | "reviewing" | "fixing" | "completed" | "error";
 export interface TeamMemberCfg {
-  id: string; provider_id: string; model: string; role: string; enabled: boolean; order: number; label: string; color: string;
+  id: string; kind?: "api" | "mcp"; provider_id: string | null; model: string; role: string; enabled: boolean; order: number; label: string; color: string;
   price_in?: number | null; price_out?: number | null;
 }
 export interface TeamConfig {
@@ -43,7 +43,7 @@ export interface TeamConfig {
   roles: Record<string, { label: string; short: string; duty: string }>; effective_roles: Record<string, string[]>;
 }
 export interface TeamMemberState {
-  id: string; name: string; provider_id: string; model: string; color: string; roles: string[]; failed: boolean;
+  id: string; name: string; provider_id: string | null; model: string; color: string; roles: string[]; failed: boolean; kind?: "api" | "mcp"; connected?: boolean | null;
   status: AgentStatus; task: string; last_message: string; issues: number; ops: number; tokens_in: number; tokens_out: number;
   calls: number; errors: number; last_error?: string;
 }

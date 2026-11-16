@@ -1,6 +1,6 @@
-import { AlertTriangle, ArrowDown, ArrowUp, Check, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, FlaskConical, Gavel, Hammer, Loader2, MessagesSquare, Plus, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Trash2, Undo2, Users, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowDown, Copy, Plug, ArrowUp, Check, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, FlaskConical, Gavel, Hammer, Loader2, MessagesSquare, Plus, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Trash2, Undo2, Users, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../lib/api";
+import { absUrl, api } from "../lib/api";
 import { useStore } from "../lib/store";
 import type { AgentStatus, ProviderInfo, QAReport, Snapshot, TeamConfig, TeamIssue, TeamMemberState, TeamMessage } from "../lib/types";
 
@@ -52,6 +52,15 @@ export default function TeamPanel() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   useEffect(() => { api.get<{ providers: ProviderInfo[] }>("/api/providers").then((r) => setProviders(r.providers)).catch(() => undefined); }, [configOpen]);
   const running = job?.status === "running" && job.engine === "team";
+  const [mcpStatus, setMcpStatus] = useState<{ id: string; connected: boolean }[]>([]);
+  const hasMcp = !!cfg?.members.some((m) => m.kind === "mcp" && m.enabled);
+  useEffect(() => {
+    if (!hasMcp) return;
+    const load = () => api.get<{ id: string; connected: boolean }[]>("/api/team/mcp/agents").then(setMcpStatus).catch(() => undefined);
+    load();
+    const t = window.setInterval(load, 5000);
+    return () => window.clearInterval(t);
+  }, [hasMcp]);
   const issues = useStore((s) => s.teamIssues);
   const pending = issues.filter((i) => i.status === "pending_user").length;
 
@@ -61,13 +70,16 @@ export default function TeamPanel() {
     return (cfg?.members.filter((m) => m.enabled) || []).map((m) => {
       const l = live.find((x) => x.id === m.id);
       const prov = providers.find((p) => p.id === m.provider_id);
-      return l ? { ...l, color: m.color } : {
-        id: m.id, name: m.label || m.model || prov?.name || "?", provider_id: m.provider_id, model: m.model || prov?.default_model || "",
+      const mcp = m.kind === "mcp";
+      const conn = mcpStatus.find((x) => x.id === m.id)?.connected ?? false;
+      return l ? { ...l, color: m.color, connected: mcp ? (l.connected ?? conn) : null } : {
+        id: m.id, kind: m.kind, connected: mcp ? conn : null, name: m.label || m.model || prov?.name || "?", provider_id: m.provider_id,
+        model: mcp ? `MCP · ${conn ? "połączony" : "niepołączony"}` : m.model || prov?.default_model || "",
         color: m.color, roles: cfg?.effective_roles[m.id] || [], failed: false, status: "idle", task: "", last_message: "",
         issues: 0, ops: 0, tokens_in: 0, tokens_out: 0, calls: 0, errors: 0,
       } as TeamMemberState;
     });
-  }, [cfg, team, providers]);
+  }, [cfg, team, providers, mcpStatus]);
 
   if (!cfg) return <div className="p-4 text-mute">Ładowanie…</div>;
   return (
@@ -103,9 +115,11 @@ export default function TeamPanel() {
             <Users size={18} className="mx-auto text-mute" />
             <div className="text-dim mt-1">Brak agentów w zespole.</div>
             <button className="btn-primary mt-2" onClick={() => setConfigOpen(true)}><Plus size={13} /> Dodaj modele do zespołu</button>
+            <div className="text-xxs text-mute mt-2">Bez kluczy API: dodaj „Agenta MCP” i podłącz Claude / Gemini CLI / ChatGPT przez MCP.</div>
           </div>
         )}
         {members.map((m) => <MemberCard key={m.id} m={m} />)}
+        {hasMcp && <McpHelp names={cfg.members.filter((m) => m.kind === "mcp" && m.enabled).map((m) => m.label)} />}
       </div>
 
       <div className="flex border-b border-line px-1">
@@ -132,9 +146,11 @@ function MemberCard({ m }: { m: TeamMemberState }) {
       <div className="flex items-center gap-2">
         <Avatar name={m.name} color={m.color} active={meta.active} />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5"><span className="font-medium truncate">{m.name}</span>
-            {m.roles.map((r) => <span key={r} className="chip !h-4 !px-1" style={{ color: m.color, borderColor: m.color + "66" }}>{ROLE_SHORT[r] || r}</span>)}</div>
-          <div className="text-xxs text-mute font-mono truncate">{m.model}</div>
+          <div className="font-medium truncate">{m.name}</div>
+          <div className="flex flex-wrap gap-1 my-0.5">
+            {m.roles.map((r) => <span key={r} className="chip !h-4 !px-1 whitespace-nowrap" style={{ color: m.color, borderColor: m.color + "66" }}>{ROLE_SHORT[r] || r}</span>)}</div>
+          <div className="text-xxs text-mute font-mono truncate flex items-center gap-1">
+            {m.kind === "mcp" && <span className={`w-1.5 h-1.5 rounded-full ${m.connected ? "bg-ok" : "bg-mute"}`} />}{m.model}</div>
         </div>
         <span className={`chip !h-5 ${meta.cls} flex items-center gap-1`}>
           {meta.active ? <Loader2 size={10} className="animate-spin" /> : m.status === "error" ? <XCircle size={10} /> : m.status === "completed" ? <CheckCircle2 size={10} /> : <CircleDashed size={10} />}
@@ -152,6 +168,51 @@ function MemberCard({ m }: { m: TeamMemberState }) {
         <span title="Tokeny wejście/wyjście">{m.tokens_in + m.tokens_out > 0 ? `${(m.tokens_in / 1000).toFixed(1)}k/${(m.tokens_out / 1000).toFixed(1)}k tok` : "— tok"}</span>
         {m.errors > 0 && <span className="text-err" title={m.last_error}>✖ {m.errors}</span>}
       </div>
+    </div>
+  );
+}
+
+function CopyBlock({ text }: { text: string }) {
+  return (
+    <div className="relative group">
+      <pre className="text-xxs font-mono bg-bg border border-line rounded p-1.5 pr-7 whitespace-pre-wrap break-all">{text}</pre>
+      <button className="icon-btn !w-5 !h-5 absolute top-1 right-1" title="Kopiuj"
+        onClick={() => { navigator.clipboard?.writeText(text); useStore.getState().notify("Skopiowano", "ok"); }}><Copy size={11} /></button>
+    </div>
+  );
+}
+
+function McpHelp({ names }: { names: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [app, setApp] = useState<"code" | "desktop" | "gemini" | "chatgpt">("code");
+  const url = (() => { const u = absUrl("/mcp/"); return u.startsWith("http") ? u : window.location.origin.replace(":5173", ":8000") + "/mcp/"; })();
+  const prompt = (n: string) => `Dołącz do zespołu AI 3D Studio: wywołaj narzędzie team_join z agent_name="${n}" i postępuj według zwróconych instrukcji — w pętli wywołuj team_wait_for_task, wykonuj zadania (modelowanie tylko przez team_run_operation) i oddawaj wyniki przez team_submit. Nie przerywaj, dopóki nie dostaniesz statusu "stop".`;
+  return (
+    <div className="rounded-lg border border-accent/40 bg-accent/5">
+      <button className="w-full flex items-center gap-1.5 px-2.5 py-2 text-left" onClick={() => setOpen(!open)}>
+        <Plug size={13} className="text-accent" /><span className="font-medium">Jak podłączyć agentów MCP (bez kluczy API)</span>
+        <span className="ml-auto">{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+      </button>
+      {open && (
+        <div className="px-2.5 pb-2.5 space-y-2">
+          <div className="text-xxs text-dim">Agent działa w Twojej aplikacji AI (na Twojej subskrypcji / logowaniu) i łączy się do tego studia. Adres serwera MCP:</div>
+          <CopyBlock text={url} />
+          <div className="flex flex-wrap gap-1">
+            {([["code", "Claude Code"], ["desktop", "Claude Desktop"], ["gemini", "Gemini CLI"], ["chatgpt", "ChatGPT"]] as const).map(([k, l]) => (
+              <button key={k} onClick={() => setApp(k)} className={`btn !h-6 text-xxs ${app === k ? "!border-accent" : ""}`}>{l}</button>
+            ))}
+          </div>
+          {app === "code" && <><div className="text-xxs text-dim">1. W terminalu:</div><CopyBlock text={`claude mcp add --transport http ai3d ${url}`} /></>}
+          {app === "desktop" && <><div className="text-xxs text-dim">1. Settings → Developer → Edit Config (wymaga Node.js), potem restart Claude Desktop:</div>
+            <CopyBlock text={JSON.stringify({ mcpServers: { ai3d: { command: "npx", args: ["-y", "mcp-remote", url] } } }, null, 2)} /></>}
+          {app === "gemini" && <><div className="text-xxs text-dim">1. Dopisz do ~/.gemini/settings.json i uruchom <span className="font-mono">gemini</span>:</div>
+            <CopyBlock text={JSON.stringify({ mcpServers: { ai3d: { httpUrl: url } } }, null, 2)} /></>}
+          {app === "chatgpt" && <div className="text-xxs text-dim">1. ChatGPT łączy się tylko z publicznym adresem HTTPS: wystaw backend (hosting) albo tunel, np. <span className="font-mono">cloudflared tunnel --url http://localhost:8000</span>, i dodaj w ChatGPT własny connector MCP (tryb deweloperski) z adresem <span className="font-mono">https://…/mcp/</span>. Dostępność zależy od Twojego planu ChatGPT.</div>}
+          <div className="text-xxs text-dim">2. Wklej do tej aplikacji polecenie (dla każdego agenta jego nazwa):</div>
+          {names.map((n) => <CopyBlock key={n} text={prompt(n)} />)}
+          <div className="text-xxs text-mute">3. Kropka przy agencie zmieni się na zieloną. Wpisz polecenie poniżej i kliknij „Zespół”. Agent musi pracować w pętli — jeśli aplikacja AI przerwie, napisz jej „kontynuuj”.</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -378,6 +439,12 @@ function TeamConfigDialog({ cfg, providers, save, onClose }: { cfg: TeamConfig; 
     auto_apply_max_severity: cfg.auto_apply_max_severity });
   const upd = (i: number, p: Partial<(typeof members)[0]>) => setMembers(members.map((m, k) => (k === i ? { ...m, ...p } : m)));
   const move = (i: number, d: number) => { const a = [...members]; const j = i + d; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; setMembers(a.map((m, k) => ({ ...m, order: k }))); };
+  const addMcp = () => {
+    const taken = new Set(members.map((m) => m.label));
+    const name = ["Claude", "Gemini", "ChatGPT", "Agent 4", "Agent 5"].find((n) => !taken.has(n)) || `Agent ${members.length + 1}`;
+    setMembers([...members, { id: "", kind: "mcp", provider_id: null, model: "", role: "auto", enabled: true, order: members.length, label: name,
+      color: ["#d97757", "#4285f4", "#10a37f", "#a970ff", "#e0a33a"][members.length % 5] }]);
+  };
   const add = (pid: string) => { const p = providers.find((x) => x.id === pid); if (!p) return; setMembers([...members, { id: "", provider_id: p.id, model: p.default_model, role: "auto", enabled: true, order: members.length, label: p.name, color: ["#d97757", "#10a37f", "#4285f4", "#a970ff", "#e0a33a"][members.length % 5] }]); };
   const num = (v: string | number) => (v === "" || v === null ? null : Number(v));
   const doSave = async () => {
@@ -400,28 +467,31 @@ function TeamConfigDialog({ cfg, providers, save, onClose }: { cfg: TeamConfig; 
                   <div className="flex flex-col"><button className="icon-btn !w-5 !h-4" onClick={() => move(i, -1)}><ArrowUp size={11} /></button><button className="icon-btn !w-5 !h-4" onClick={() => move(i, 1)}><ArrowDown size={11} /></button></div>
                   <div className="flex items-center gap-1.5 min-w-0"><input type="color" value={m.color} onChange={(e) => upd(i, { color: e.target.value })} className="w-5 h-5 bg-transparent" />
                     <input className="input" value={m.label} placeholder={p?.name} onChange={(e) => upd(i, { label: e.target.value })} /></div>
+                  {m.kind === "mcp" ? <span className="chip !h-7 justify-center" title="Agent łączy się przez MCP — nazwa podawana w team_join">Agent MCP · bez klucza</span> : (
                   <select className="input font-mono text-xxs" value={m.model} onChange={(e) => upd(i, { model: e.target.value })}>
                     {[...new Set([m.model, ...(p?.models || [])])].filter(Boolean).map((x) => <option key={x}>{x}</option>)}
-                  </select>
+                  </select>)}
                   <select className="input" value={m.role} onChange={(e) => upd(i, { role: e.target.value })}>
                     <option value="auto">auto ({(cfg.effective_roles[m.id] || []).map((r) => ROLE_SHORT[r]).join(", ") || "—"})</option>
                     {Object.entries(cfg.roles).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
                   </select>
                   <label className="flex items-center gap-1 text-xxs"><input type="checkbox" checked={m.enabled} onChange={(e) => upd(i, { enabled: e.target.checked })} />aktywny</label>
                   <button className="icon-btn" onClick={() => setMembers(members.filter((_, k) => k !== i))}><Trash2 size={13} /></button>
+                  {m.kind === "mcp" ? <div className="col-span-6 text-xxs text-mute pl-6">Nazwa „{m.label}” wpisujesz w aplikacji AI (team_join). Instrukcje podłączenia są w panelu AI Team.</div> : (
                   <div className="col-span-6 flex gap-2 items-center text-xxs text-mute pl-6">
                     {p ? <>{p.label} · {p.has_key ? `klucz ${p.key_preview}` : "bez klucza"}</> : <span className="text-err">połączenie usunięte</span>}
                     <span className="ml-auto">cena $/1M tok (opcjonalnie): we</span><input className="input !w-16 !h-6" type="number" step="0.01" value={m.price_in ?? ""} onChange={(e) => upd(i, { price_in: e.target.value === "" ? null : Number(e.target.value) })} />
                     wy<input className="input !w-16 !h-6" type="number" step="0.01" value={m.price_out ?? ""} onChange={(e) => upd(i, { price_out: e.target.value === "" ? null : Number(e.target.value) })} />
-                  </div>
+                  </div>)}
                 </div>
               );
             })}
+            <button className="btn-primary w-full justify-center" onClick={addMcp}><Plug size={13} /> Dodaj agenta MCP (bez klucza API — Claude Desktop/Code, Gemini CLI, ChatGPT)</button>
             <select className="input" value="" onChange={(e) => add(e.target.value)}>
-              <option value="">+ Dodaj model do zespołu (z AI Connections)…</option>
+              <option value="">+ albo model przez klucz API (z AI Connections)…</option>
               {providers.filter((p) => p.enabled).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.label}</option>)}
             </select>
-            {!providers.length && <div className="text-xxs text-warn">Najpierw dodaj połączenie w Ustawienia → AI Connections.</div>}
+
           </div>
           <div className="grid grid-cols-4 gap-2">
             {([["max_rounds", "Rundy kontroli"], ["max_debate_rounds", "Rundy debaty"], ["build_max_turns", "Tury narzędzi / agent"], ["retries", "Ponowienia zapytań"],

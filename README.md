@@ -31,6 +31,30 @@ Aplikacja webowa do tworzenia, edycji i eksportu modeli 3D z pomocą AI. Model p
 
 Panel znajdziesz w zakładce **AI Team** po prawej. Połączenia (klucz, adres, model, test, zużycie tokenów i błędy) konfigurujesz w **Ustawienia → AI Connections**. Skład zespołu, role, kolejność, włączanie agentów, ceny i limity ustawiasz pod ikoną ⚙ w panelu AI Team.
 
+### Zespół bez kluczy API — agenci MCP
+
+Członkiem zespołu może być **agent MCP**: aplikacja AI, w której jesteś zalogowany (Claude Code, Claude Desktop, Gemini CLI, ChatGPT z connectorami MCP). Działa na Twojej subskrypcji lub logowaniu, a w studiu nie ma żadnego klucza.
+
+Odwrócony kierunek: backend nie wywołuje modelu, tylko wystawia zadania w kolejce. Aplikacja AI pobiera je przez MCP i wykonuje, a cały proces (plan, krytyka, debata, budowa, kontrola, poprawki) jest identyczny jak dla modeli z kluczem.
+
+1. W panelu AI Team kliknij ⚙ i **Dodaj agenta MCP**, nadaj mu nazwę, np. `Claude` albo `Gemini`.
+2. Podłącz aplikację do `http://<backend>/mcp/`. Gotowe polecenia do skopiowania są w panelu w sekcji „Jak podłączyć agentów MCP”:
+   - Claude Code: `claude mcp add --transport http ai3d http://localhost:8000/mcp/`
+   - Gemini CLI: w `~/.gemini/settings.json` dodaj `{"mcpServers": {"ai3d": {"httpUrl": "http://localhost:8000/mcp/"}}}`
+   - Claude Desktop: przez `npx mcp-remote http://localhost:8000/mcp/`
+   - ChatGPT: wymaga publicznego adresu HTTPS (hosting albo tunel).
+3. Wklej do aplikacji AI polecenie z panelu, np. *„Dołącz do zespołu AI 3D Studio: wywołaj team_join z agent_name="Claude"…”*. Agent pracuje wtedy w pętli `team_wait_for_task` → zadanie → `team_run_operation` / `team_submit`.
+4. Gdy kropka przy agencie zmieni kolor na zielony, wpisz polecenie i kliknij **Zespół**.
+
+Ograniczenia:
+
+- Agent pracuje tylko wtedy, gdy aplikacja AI jest otwarta i wykonuje pętlę. Jeśli się zatrzyma, napisz jej „kontynuuj”.
+- Po przekroczeniu `mcp_timeout` (domyślnie 900 s) agent jest uznawany za niedostępny, a jego rolę przejmują pozostali.
+- Agenci MCP nie dostają obrazów, tylko ich identyfikatory i palety kolorów.
+- Tokeny nie są liczone, bo zużycie rozlicza aplikacja AI.
+
+Możesz mieszać agentów MCP z modelami podłączonymi kluczem API.
+
 **Przebieg zadania** (wszystkie wiadomości to prawdziwe wywołania podłączonych modeli, a backend pośredniczy w całej komunikacji):
 
 ```
@@ -144,7 +168,7 @@ SECRET_KEY=$(python -c "import secrets;print(secrets.token_urlsafe(48))") docker
 ## Testy
 
 ```bash
-cd backend && python -m pytest -q tests     # 24 testy
+cd backend && python -m pytest -q tests     # 25 testów
 cd frontend && npm run build                # typecheck + build
 ```
 
@@ -162,7 +186,8 @@ Testy obejmują:
   - **D**: Gemini przestaje odpowiadać, pozostali kończą pracę;
   - **E**: sprzeczne opinie rozstrzyga Lead;
   - **F**: test wykrywa za cienkie logo, w trybie REVIEW następują zatwierdzenie, naprawa, ponowny test i cofnięcie poprawki;
-  - dodatkowo tryb MANUAL i limity tokenów.
+  - dodatkowo tryb MANUAL i limity tokenów;
+- zespół bez kluczy `tests/test_team_mcp.py`: dwóch agentów łączy się **prawdziwym protokołem MCP** z osobnym procesem serwera i przechodzi cały proces bez żadnego dostawcy API.
 
 ## Hosting (produkcja)
 
