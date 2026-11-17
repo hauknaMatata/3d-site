@@ -1,0 +1,16 @@
+{
+  // GitHub Codespaces: free cloud machine that runs the AI 3D Studio engine (not on your computer).
+  // Code → Codespaces → Create codespace on this branch. The engine installs and starts by itself.
+  "name": "AI 3D Studio engine",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "hostRequirements": { "cpus": 2, "memory": "8gb" },
+  "features": { "ghcr.io/devcontainers/features/github-cli:1": {} },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postStartCommand": "bash .devcontainer/start-engine.sh",
+  "forwardPorts": [8000],
+  "portsAttributes": { "8000": { "label": "AI 3D Studio engine", "onAutoForward": "silent" } },
+  "customizations": {
+    "codespaces": { "openFiles": [".devcontainer/README.md"] },
+    "vscode": { "extensions": ["ms-python.python"] }
+  }
+}

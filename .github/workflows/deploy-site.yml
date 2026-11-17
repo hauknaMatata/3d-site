@@ -4,7 +4,7 @@ name: Deploy site (GitHub Pages)
 on:
   push:
     branches: [main, claude/h-qaq48w]
-    paths: [frontend/**, .github/workflows/deploy-site.yml]
+    paths: [frontend/**, .devcontainer/**, .github/workflows/deploy-site.yml]
   workflow_run:
     workflows: ["Deploy engine (Hugging Face Space)"]
     types: [completed]
@@ -35,6 +35,8 @@ jobs:
         env:
           VITE_API_URL: ${{ steps.api.outputs.url }}
           VITE_BASE: /${{ github.event.repository.name }}/
+          # until the code is merged to main, Codespaces / clone links point to the branch that has it
+          VITE_ENGINE_BRANCH: ${{ (github.event.workflow_run.head_branch || github.ref_name) != 'main' && (github.event.workflow_run.head_branch || github.ref_name) || '' }}
       - working-directory: frontend/dist
         run: |
           git init -q -b gh-pages

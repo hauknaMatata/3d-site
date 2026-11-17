@@ -189,12 +189,28 @@ Testy obejmują:
   - dodatkowo tryb MANUAL i limity tokenów;
 - zespół bez kluczy `tests/test_team_mcp.py`: dwóch agentów łączy się **prawdziwym protokołem MCP** z osobnym procesem serwera i przechodzi cały proces bez żadnego dostawcy API.
 
-## Hosting: strona online + silnik online (użytkownik niczego nie instaluje)
+## Hosting za darmo: strona na GitHub Pages + silnik w GitHub Codespaces
+
+Strona: **https://hauknamatata.github.io/3d-site/** (gałąź `gh-pages`, aktualizowana przez `deploy-site.yml`).
+
+Silnik działa w **GitHub Codespaces**, czyli darmowej maszynie w chmurze GitHuba. Nie potrzebujesz karty ani nowego konta i nie uruchamiasz niczego na swoim komputerze.
+
+1. Na stronie kliknij **„Uruchom silnik w Codespaces”**, potem **Create codespace**. Plik `.devcontainer/` sam instaluje zależności, uruchamia silnik i wystawia port 8000 publicznie.
+2. W terminalu Codespace pojawi się link `https://hauknamatata.github.io/3d-site/?engine=https://<codespace>-8000.app.github.dev`. Kliknij go, a strona zapamięta adres silnika.
+3. Agenci AI (Claude Code, Gemini CLI, ChatGPT) łączą się z adresem `…app.github.dev/mcp/`.
+
+Ograniczenia darmowego planu:
+
+- 120 godzin rdzenia miesięcznie, czyli ok. 60 godzin pracy na maszynie 2-rdzeniowej z 8 GB RAM.
+- Codespace wyłącza się po bezczynności: domyślnie po 30 minutach, a w ustawieniach GitHuba można to wydłużyć do 4 godzin.
+- Po wyłączeniu uruchamiasz go ponownie jednym kliknięciem, a silnik startuje sam. Projekty zostają zapisane na dysku Codespace.
+
+## Hosting stały (płatny): strona online + silnik online
 
 | Element | Gdzie | Jak się aktualizuje |
 |---|---|---|
 | Strona (interfejs) | GitHub Pages, `https://hauknamatata.github.io/3d-site/` (gałąź `gh-pages`) | workflow `deploy-site.yml` po każdej zmianie |
-| Silnik (CAD, siatki, eksport, AI Team, MCP) | Hugging Face Space (Docker, darmowy CPU: 2 vCPU, 16 GB RAM) | workflow `deploy-engine.yml` po każdej zmianie |
+| Silnik (CAD, siatki, eksport, AI Team, MCP) | Hugging Face Space (Docker; hostowanie wymaga planu PRO, 9 $/mies.) | workflow `deploy-engine.yml` po każdej zmianie |
 
 **Jednorazowa konfiguracja:**
 

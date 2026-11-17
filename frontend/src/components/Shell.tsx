@@ -160,7 +160,21 @@ uvicorn app.main:app --port 8000`;
               <div className="mt-3">{localPart}</div></details>
           </>
         )}
-        {!hosted && <><h1 className="text-xl font-semibold tracking-tight mt-3">Uruchom silnik AI 3D Studio na swoim komputerze</h1>{localPart}</>}
+        {!hosted && (
+          <>
+            <h1 className="text-xl font-semibold tracking-tight mt-3">Uruchom silnik AI 3D Studio w chmurze (za darmo)</h1>
+            <p className="text-dim mt-2 leading-relaxed">Silnik działa w <b>GitHub Codespaces</b> — darmowej maszynie w chmurze GitHuba (nie na Twoim komputerze).</p>
+            <ol className="mt-3 space-y-1.5 text-dim list-decimal pl-5">
+              <li><a className="text-accent hover:underline" target="_blank" rel="noreferrer"
+                href={`https://codespaces.new/hauknaMatata/3d-site${branch ? `/tree/${branch}` : ""}?quickstart=1`}>Kliknij tutaj, aby uruchomić silnik w Codespaces</a> → <b>Create codespace</b>.</li>
+              <li>Poczekaj na komunikat w terminalu <span className="font-mono">„Silnik AI 3D Studio działa”</span> (pierwszy raz 3–5 min, kolejne starty ~30 s).</li>
+              <li>Kliknij link <span className="font-mono">Strona: https://hauknamatata.github.io/3d-site/?engine=…</span> z terminala — strona zapamięta adres silnika.</li>
+            </ol>
+            <p className="text-xxs text-mute mt-3">Codespace wyłącza się po bezczynności (domyślnie 30 min, max 4 h w ustawieniach GitHub → Codespaces). Darmowy limit: ok. 60 h pracy miesięcznie. Jeśli przeglądarka pokaże stronę ostrzegawczą GitHuba dla adresu silnika, otwórz go raz i kliknij „Continue”.</p>
+            <details className="mt-6 text-dim"><summary className="cursor-pointer hover:text-fg">Zaawansowane: silnik lokalny lub własny adres</summary>
+              <div className="mt-3">{localPart}</div></details>
+          </>
+        )}
       </div>
     </div>
   );
