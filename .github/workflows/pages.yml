@@ -1,5 +1,5 @@
-# Deploys the frontend to GitHub Pages. Set repository variable API_URL (Settings → Variables → Actions)
-# to the public backend URL, e.g. https://ai-3d-studio-api.onrender.com
+# Deploys the frontend to GitHub Pages (Settings → Pages → Source: GitHub Actions). By default the page connects to
+# the engine on the user's machine (http://localhost:8000). For a hosted engine set repository variable API_URL.
 name: Deploy frontend to GitHub Pages
 on:
   push:
@@ -16,9 +16,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
       - run: npm ci
-      - run: npm run build
+      - run: npm run build && touch dist/.nojekyll && cp dist/index.html dist/404.html
         env:
-          VITE_API_URL: ${{ vars.API_URL }}
+          # default: the engine runs on the user's own machine (needed for MCP agents without API keys)
+          VITE_API_URL: ${{ vars.API_URL || 'http://localhost:8000' }}
           VITE_BASE: /${{ github.event.repository.name }}/
       - uses: actions/upload-pages-artifact@v3
         with: { path: frontend/dist }

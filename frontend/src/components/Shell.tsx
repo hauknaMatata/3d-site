@@ -1,6 +1,6 @@
 import { AlertTriangle, Box, Car, ChevronDown, Copy, Download, FileUp, FolderOpen, Hexagon, Import, Plus, Settings, Trash2, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, download } from "../lib/api";
+import { api, ApiError, apiBase, apiToken, download, setConnection } from "../lib/api";
 import { answerConfirm, useStore } from "../lib/store";
 import type { Mode, Project, Snapshot } from "../lib/types";
 
@@ -59,8 +59,12 @@ export function Home({ onSettings }: { onSettings: () => void }) {
   const [mode, setMode] = useState<Mode>("cad");
   const [err, setErr] = useState("");
   const bundleRef = useRef<HTMLInputElement>(null);
-  const load = () => api.get<Project[]>("/api/projects").then((p) => { setProjects(p); setErr(""); }).catch((e) => setErr(e.message));
+  const [offline, setOffline] = useState(false);
+  const load = () => api.get<Project[]>("/api/projects").then((p) => { setProjects(p); setErr(""); setOffline(false); })
+    .catch((e) => { setErr(e.message); setOffline(!(e instanceof ApiError)); });
   useEffect(() => { load(); }, []);
+  useEffect(() => { if (!offline) return; const t = window.setInterval(load, 4000); return () => window.clearInterval(t); }, [offline]);
+  if (offline) return <EngineOffline onSettings={onSettings} retry={load} />;
   const create = async () => {
     try { const p = await api.post<Project>("/api/projects", { name: name.trim() || (mode === "cad" ? "Nowa część CAD" : "Nowy asset"), mode }); useStore.getState().open(p.id); }
     catch (e) { setErr((e as Error).message); }
@@ -107,6 +111,41 @@ export function Home({ onSettings }: { onSettings: () => void }) {
             ))}
             {!projects.length && <div className="text-mute text-center py-10">Brak projektów</div>}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EngineOffline({ onSettings, retry }: { onSettings: () => void; retry: () => void }) {
+  const [url, setUrl] = useState(apiBase() || "http://localhost:8000");
+  const pages = window.location.hostname.endsWith("github.io");
+  const branch = (import.meta.env.VITE_ENGINE_BRANCH as string) || "";
+  const steps = `git clone ${branch ? `-b ${branch} ` : ""}https://github.com/hauknaMatata/3d-site.git
+cd 3d-site/backend
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
+pip install -r requirements.txt
+uvicorn app.main:app --port 8000`;
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="h-11 flex items-center px-4 border-b border-line bg-panel"><Logo /><div className="flex-1" /><button className="btn-ghost" onClick={onSettings}><Settings size={14} /> Ustawienia</button></div>
+      <div className="max-w-2xl mx-auto px-6 py-12">
+        <div className="flex items-center gap-2 text-warn"><span className="w-2 h-2 rounded-full bg-warn pulse-dot" /> Szukam silnika 3D pod {apiBase() || "tym adresem"}…</div>
+        <h1 className="text-xl font-semibold tracking-tight mt-3">Uruchom silnik AI 3D Studio na swoim komputerze</h1>
+        <p className="text-dim mt-2 leading-relaxed">
+          {pages ? "Ta strona (GitHub Pages) to interfejs. " : ""}Modelowanie CAD (OpenCascade), siatki, eksport i serwer MCP dla agentów AI działają w lokalnym
+          silniku w Pythonie — dzięki temu pracujesz na swoim sprzęcie i bez kluczy API. Wymagany Python 3.11–3.13.
+        </p>
+        <pre className="mt-4 text-xxs font-mono bg-bg border border-line rounded-lg p-3 whitespace-pre-wrap select-all">{steps}</pre>
+        <p className="text-dim mt-3">Gdy w terminalu pojawi się <span className="font-mono">Uvicorn running on http://127.0.0.1:8000</span>, ta strona połączy się sama (sprawdzam co 4 s).</p>
+        <div className="mt-5 rounded-lg border border-line2 p-3">
+          <div className="label mb-1">Adres silnika</div>
+          <div className="flex gap-2">
+            <input className="input font-mono" value={url} onChange={(e) => setUrl(e.target.value)} />
+            <button className="btn-primary" onClick={() => { setConnection(url.trim(), apiToken()); retry(); }}>Połącz</button>
+          </div>
+          <div className="text-xxs text-mute mt-1.5">Chrome/Edge mogą zapytać o zgodę na dostęp do sieci lokalnej — zezwól. Safari blokuje połączenia https → http://localhost; użyj Chrome, Edge lub Firefoksa.</div>
         </div>
       </div>
     </div>

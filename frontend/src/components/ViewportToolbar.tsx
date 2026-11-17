@@ -35,7 +35,7 @@ export default function ViewportToolbar(p: { measuring: boolean; toggleMeasure: 
         <button title="Pomiar odległości" onClick={p.toggleMeasure} className={`icon-btn ${p.measuring ? "!bg-[#ffd166]/20 !text-[#ffd166]" : ""}`}><Ruler size={14} /></button>
         <button title="Siatka" onClick={p.toggleGrid} className={`icon-btn ${p.showGrid ? "!text-fg" : ""}`}><Grid3x3 size={14} /></button>
       </div>
-      <div className="absolute right-3 top-3 flex items-center gap-1">
+      <div className="absolute right-3 top-3 left-56 flex flex-wrap items-center justify-end gap-1 pointer-events-none [&>*]:pointer-events-auto">
         <div className="flex p-1 rounded-lg bg-panel/90 border border-line backdrop-blur">
           {VIEWS.map(([id, l]) => (
             <button key={id} onClick={() => setView(id)} className="btn-ghost !h-6 !px-1.5 text-xxs" title={`Widok: ${l}`}>{l}</button>

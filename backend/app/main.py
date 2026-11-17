@@ -26,8 +26,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AI 3D Studio API", version="1.0.0", lifespan=lifespan)
+
+# allow_private_network: Chrome asks before a public site (GitHub Pages) may call the engine on http://localhost
 app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ORIGINS, allow_credentials=False,
-                   allow_methods=["*"], allow_headers=["*"])
+                   allow_methods=["*"], allow_headers=["*"], allow_private_network=True)
 
 
 @app.middleware("http")
