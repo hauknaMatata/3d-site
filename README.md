@@ -189,12 +189,29 @@ Testy obejmują:
   - dodatkowo tryb MANUAL i limity tokenów;
 - zespół bez kluczy `tests/test_team_mcp.py`: dwóch agentów łączy się **prawdziwym protokołem MCP** z osobnym procesem serwera i przechodzi cały proces bez żadnego dostawcy API.
 
-## Hosting (produkcja)
+## Hosting: strona online + silnik online (użytkownik niczego nie instaluje)
 
-- **Backend i silnik CAD**: obraz Docker z `backend/Dockerfile`, na dowolnym hoście z ≥2 GB RAM i trwałym dyskiem (Render, Fly.io, Railway, VPS). Blueprint Render jest w `render.yaml`. Ustaw `SECRET_KEY` (wymagany), `CORS_ORIGINS` (URL frontendu) i opcjonalnie `API_TOKEN`.
-- **Frontend**: workflow `.github/workflows/pages.yml` publikuje go na GitHub Pages po pushu do `main`. Ustaw zmienną repozytorium `API_URL` (Settings → Variables) na adres backendu i włącz Pages (źródło: GitHub Actions). Frontend możesz też postawić na Vercelu: build `npm run build`, katalog `frontend/dist`, zmienna `VITE_API_URL`.
-- **CI**: `.github/workflows/ci.yml` uruchamia testy backendu, build frontendu i build obrazu Docker.
-- Za reverse proxy przekaż `/api/` (z WebSocket upgrade) i `/mcp/` do backendu. Przykład jest w `deploy/nginx.conf`.
+| Element | Gdzie | Jak się aktualizuje |
+|---|---|---|
+| Strona (interfejs) | GitHub Pages, `https://hauknamatata.github.io/3d-site/` (gałąź `gh-pages`) | workflow `deploy-site.yml` po każdej zmianie |
+| Silnik (CAD, siatki, eksport, AI Team, MCP) | Hugging Face Space (Docker, darmowy CPU: 2 vCPU, 16 GB RAM) | workflow `deploy-engine.yml` po każdej zmianie |
+
+**Jednorazowa konfiguracja:**
+
+1. Załóż konto na https://huggingface.co, potem **New Space**: SDK **Docker**, szablon **Blank**, widoczność **Public**. Przykładowa nazwa: `ai3d-engine`.
+2. Utwórz token: https://huggingface.co/settings/tokens, rodzaj **Write**.
+3. W GitHubie wejdź w repozytorium → **Settings → Secrets and variables → Actions**:
+   - **Secrets**: `HF_TOKEN` = token z kroku 2. Opcjonalnie `ENGINE_SECRET_KEY` = losowy ciąg, który szyfruje zapisane klucze.
+   - **Variables**: `HF_SPACE` = `<login-hf>/<nazwa-space>`, np. `hauknamatata/ai3d-engine`.
+4. Wejdź w **Actions** i uruchom **Deploy engine**. Po jego zakończeniu **Deploy site** uruchomi się sam i wbuduje adres `https://<login>-<space>.hf.space` w stronę.
+
+Ograniczenia darmowego planu:
+
+- Space usypia się po okresie bezczynności, więc pierwsze wejście trwa 1–3 minuty. Strona pokazuje wtedy komunikat „silnik się uruchamia”.
+- Dysk jest ulotny: po restarcie Space projekty znikają. Rozwiązania: Persistent Storage w Hugging Face (płatne) albo eksport projektu `.ai3d.zip`.
+- Wszyscy użytkownicy widzą te same projekty, bo nie ma kont użytkowników. Ustaw `API_TOKEN` w sekretach Space, jeśli silnik ma być prywatny.
+
+Inne hostingi: `backend/Dockerfile` zadziała na każdym hostingu Docker z co najmniej 2 GB RAM (Render: `render.yaml`, Fly.io, VPS). Wtedy ustaw zmienną `API_URL` zamiast `HF_SPACE`.
 
 ## MCP: podłączenie agenta do silników
 

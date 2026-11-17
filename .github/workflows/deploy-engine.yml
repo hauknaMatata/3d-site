@@ -1,0 +1,43 @@
+# Deploys the engine (backend/) to a Hugging Face Docker Space — free CPU hardware, public HTTPS URL.
+# Setup once: repository secret HF_TOKEN (Hugging Face token with write access) and repository variable
+# HF_SPACE = "<hf-username>/<space-name>" (Settings → Secrets and variables → Actions).
+name: Deploy engine (Hugging Face Space)
+on:
+  push:
+    branches: [main, claude/h-qaq48w]
+    paths: [backend/**, deploy/hf-space/**, .github/workflows/deploy-engine.yml]
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: cfg
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          if [ -z "$HF_TOKEN" ] || [ -z "$HF_SPACE" ]; then
+            echo "::warning::Engine not deployed: set secret HF_TOKEN and variable HF_SPACE (see README → Hosting)."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.cfg.outputs.skip != '1'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+          SECRET_KEY: ${{ secrets.ENGINE_SECRET_KEY }}
+        run: |
+          mkdir space
+          cp -r backend/app backend/requirements.txt backend/Dockerfile space/
+          cp deploy/hf-space/README.md space/README.md
+          cd space
+          git init -q -b main
+          git add -A
+          git -c user.name="github-actions" -c user.email="actions@users.noreply.github.com" commit -q -m "Deploy ${GITHUB_SHA::7} from GitHub"
+          git push --force "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" main
+          if [ -n "$SECRET_KEY" ]; then
+            curl -fsS -X POST "https://huggingface.co/api/spaces/${HF_SPACE}/secrets" -H "Authorization: Bearer ${HF_TOKEN}" \
+              -H "Content-Type: application/json" -d "{\"key\":\"SECRET_KEY\",\"value\":\"${SECRET_KEY}\"}" > /dev/null
+          fi
+          SUB=$(echo "$HF_SPACE" | tr '[:upper:]' '[:lower:]' | sed 's#/#-#; s#[._]#-#g')
+          echo "Engine URL: https://${SUB}.hf.space" >> "$GITHUB_STEP_SUMMARY"

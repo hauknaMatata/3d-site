@@ -1,0 +1,43 @@
+# Builds the web UI and publishes it to the gh-pages branch (Settings → Pages → Deploy from branch: gh-pages).
+# Engine URL: variable API_URL, or derived from HF_SPACE (https://<user>-<space>.hf.space), else the local engine.
+name: Deploy site (GitHub Pages)
+on:
+  push:
+    branches: [main, claude/h-qaq48w]
+    paths: [frontend/**, .github/workflows/deploy-site.yml]
+  workflow_run:
+    workflows: ["Deploy engine (Hugging Face Space)"]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: { group: site, cancel-in-progress: true }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ github.event.workflow_run.head_branch || github.ref }}" }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - id: api
+        env:
+          API_URL: ${{ vars.API_URL }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          if [ -n "$API_URL" ]; then URL="$API_URL"
+          elif [ -n "$HF_SPACE" ]; then URL="https://$(echo "$HF_SPACE" | tr '[:upper:]' '[:lower:]' | sed 's#/#-#; s#[._]#-#g').hf.space"
+          else URL="http://localhost:8000"; fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Engine URL baked into the site: $URL" >> "$GITHUB_STEP_SUMMARY"
+      - working-directory: frontend
+        run: npm ci && npm run build && touch dist/.nojekyll && cp dist/index.html dist/404.html
+        env:
+          VITE_API_URL: ${{ steps.api.outputs.url }}
+          VITE_BASE: /${{ github.event.repository.name }}/
+      - working-directory: frontend/dist
+        run: |
+          git init -q -b gh-pages
+          git add -A
+          git -c user.name="github-actions" -c user.email="actions@users.noreply.github.com" commit -q -m "Deploy site ${GITHUB_SHA::7}"
+          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh-pages

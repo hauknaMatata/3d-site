@@ -120,6 +120,7 @@ export function Home({ onSettings }: { onSettings: () => void }) {
 function EngineOffline({ onSettings, retry }: { onSettings: () => void; retry: () => void }) {
   const [url, setUrl] = useState(apiBase() || "http://localhost:8000");
   const pages = window.location.hostname.endsWith("github.io");
+  const hosted = !!apiBase() && !/localhost|127\.0\.0\.1/.test(apiBase());
   const branch = (import.meta.env.VITE_ENGINE_BRANCH as string) || "";
   const steps = `git clone ${branch ? `-b ${branch} ` : ""}https://github.com/hauknaMatata/3d-site.git
 cd 3d-site/backend
@@ -127,12 +128,8 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
 pip install -r requirements.txt
 uvicorn app.main:app --port 8000`;
-  return (
-    <div className="h-full overflow-y-auto">
-      <div className="h-11 flex items-center px-4 border-b border-line bg-panel"><Logo /><div className="flex-1" /><button className="btn-ghost" onClick={onSettings}><Settings size={14} /> Ustawienia</button></div>
-      <div className="max-w-2xl mx-auto px-6 py-12">
-        <div className="flex items-center gap-2 text-warn"><span className="w-2 h-2 rounded-full bg-warn pulse-dot" /> Szukam silnika 3D pod {apiBase() || "tym adresem"}…</div>
-        <h1 className="text-xl font-semibold tracking-tight mt-3">Uruchom silnik AI 3D Studio na swoim komputerze</h1>
+  const localPart = (
+    <>
         <p className="text-dim mt-2 leading-relaxed">
           {pages ? "Ta strona (GitHub Pages) to interfejs. " : ""}Modelowanie CAD (OpenCascade), siatki, eksport i serwer MCP dla agentów AI działają w lokalnym
           silniku w Pythonie — dzięki temu pracujesz na swoim sprzęcie i bez kluczy API. Wymagany Python 3.11–3.13.
@@ -147,6 +144,23 @@ uvicorn app.main:app --port 8000`;
           </div>
           <div className="text-xxs text-mute mt-1.5">Chrome/Edge mogą zapytać o zgodę na dostęp do sieci lokalnej — zezwól. Safari blokuje połączenia https → http://localhost; użyj Chrome, Edge lub Firefoksa.</div>
         </div>
+    </>
+  );
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="h-11 flex items-center px-4 border-b border-line bg-panel"><Logo /><div className="flex-1" /><button className="btn-ghost" onClick={onSettings}><Settings size={14} /> Ustawienia</button></div>
+      <div className="max-w-2xl mx-auto px-6 py-12">
+        <div className="flex items-center gap-2 text-warn"><span className="w-2 h-2 rounded-full bg-warn pulse-dot" /> Łączę z silnikiem 3D: {apiBase() || "ten sam adres"}…</div>
+        {hosted && (
+          <>
+            <h1 className="text-xl font-semibold tracking-tight mt-3">Silnik online się uruchamia</h1>
+            <p className="text-dim mt-2 leading-relaxed">Silnik 3D działa na serwerze w chmurze. Darmowy hosting usypia go po dłuższej bezczynności —
+              pierwsze wejście może potrwać 1–3 minuty. Nic nie musisz instalować; strona połączy się sama (sprawdzam co 4 s).</p>
+            <details className="mt-6 text-dim"><summary className="cursor-pointer hover:text-fg">Zaawansowane: użyj własnego silnika (lokalnie)</summary>
+              <div className="mt-3">{localPart}</div></details>
+          </>
+        )}
+        {!hosted && <><h1 className="text-xl font-semibold tracking-tight mt-3">Uruchom silnik AI 3D Studio na swoim komputerze</h1>{localPart}</>}
       </div>
     </div>
   );
