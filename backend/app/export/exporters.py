@@ -410,13 +410,16 @@ def validate(fmt: str, path: Path, main: Path | None = None) -> dict[str, Any]:
             return {"ok": shp.isValid(), "reimported_with": "OpenCascade", "solids": len(shp.Solids()),
                     "volume": round(shp.Volume(), 3), "size": [round(bb.xlen, 4), round(bb.ylen, 4), round(bb.zlen, 4)]}
         if fmt == "fbx":
-            info = _assimp("info", str(target))
-            meshes = re.search(r"Meshes:\s+(\d+)", info)
-            faces = re.search(r"Faces:\s+(\d+)", info)
-            mats = re.search(r"Materials:\s+(\d+)", info)
-            ok = bool(meshes and int(meshes.group(1)) > 0)
-            return {"ok": ok, "reimported_with": "assimp", "meshes": int(meshes.group(1)) if meshes else 0,
-                    "faces": int(faces.group(1)) if faces else None, "materials": int(mats.group(1)) if mats else None}
+            # re-import with assimp: convert back to OBJ and count real geometry (robust across assimp versions)
+            with tempfile.TemporaryDirectory(dir=config.EXPORT_DIR) as td:
+                back = Path(td) / "reimport.obj"
+                _assimp("export", str(target), str(back), "-fobj")
+                loaded = trimesh.load(str(back), force="scene")
+                faces = int(sum(len(g.faces) for g in loaded.geometry.values() if hasattr(g, "faces")))
+                mtl = back.with_suffix(".mtl")
+                mats = mtl.read_text(errors="ignore").count("newmtl") if mtl.exists() else None
+            return {"ok": faces > 0, "reimported_with": "assimp→obj", "meshes": len(loaded.geometry), "faces": faces,
+                    "materials": mats}
         if fmt == "usdz":
             from pxr import Usd, UsdGeom
 

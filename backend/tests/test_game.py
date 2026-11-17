@@ -61,7 +61,7 @@ def test_fbx_export(make_project):
     rt, att = make_project("game")
     rt.apply("add_wheel", {"name": "W"})
     r = export(rt, {"format": "fbx", "texture_res": 256})
-    assert r["validation"]["ok"] and r["validation"]["meshes"] > 0
+    assert r["validation"]["ok"] and r["validation"]["meshes"] > 0, r["validation"]
 
 
 def test_step_refused_for_mesh_projects(make_project):
